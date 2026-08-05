@@ -1,0 +1,141 @@
+"""NDFC Kokoro Bridge 消息观察处理器。
+
+监听消息接收与发送事件，维护私聊流的最近活动时间、等待状态和心理活动摘要。
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Any
+
+from src.app.plugin_system.api.event_api import EventDecision
+from src.app.plugin_system.api.log_api import get_logger
+from src.app.plugin_system.base import BaseEventHandler
+from src.app.plugin_system.types import EventType, Message
+
+from ..config import NDFCKokoroBridgeConfig
+from ..models import MentalEntry
+from ..store import BridgeSessionStore
+
+logger = get_logger("ndfc_kokoro_bridge.message")
+
+
+class NDFCKokoroMessageObserver(BaseEventHandler):
+    """观察私聊消息收发并更新 BridgeSession。"""
+
+    name: str = "ndfc_kokoro_message_observer"
+    description: str = "记录私聊消息收发状态并维护回复等待"
+    weight: int = 5
+    intercept_message: bool = False
+    init_subscribe: list[EventType] = [EventType.ON_MESSAGE_RECEIVED, EventType.ON_MESSAGE_SENT]
+
+    def get_config(self) -> NDFCKokoroBridgeConfig:
+        """获取插件配置，委托给插件实例。"""
+        return self.plugin.get_config()  # type: ignore[attr-defined]
+
+    def get_store(self) -> BridgeSessionStore:
+        """获取插件级会话存储。"""
+        return self.plugin.session_store  # type: ignore[attr-defined]
+
+    async def execute(
+        self,
+        event_name: str,
+        params: dict[str, Any],
+    ) -> tuple[EventDecision, dict[str, Any]]:
+        """处理消息收发事件。"""
+        config = self.get_config()
+        if not config.plugin.enabled:
+            return EventDecision.SUCCESS, params
+
+        message = params.get("message")
+        if not isinstance(message, Message):
+            return EventDecision.PASS, params
+
+        chat_type = getattr(message.chat_type, "value", message.chat_type)
+        if config.plugin.private_only and str(chat_type) != "private":
+            return EventDecision.SUCCESS, params
+
+        normalized_event_name = str(getattr(event_name, "value", event_name))
+        if normalized_event_name == EventType.ON_MESSAGE_RECEIVED.value:
+            await self._on_message_received(message)
+        elif normalized_event_name == EventType.ON_MESSAGE_SENT.value:
+            await self._on_message_sent(message)
+
+        return EventDecision.SUCCESS, params
+
+    async def _on_message_received(self, message: Message) -> None:
+        """记录用户消息到达。"""
+        store = self.get_store()
+        config = self.get_config()
+        stream_id = message.stream_id
+        if not stream_id:
+            return
+
+        async with store.lock(stream_id):
+            session = await store.get_or_create(stream_id)
+            session.platform = message.platform or session.platform
+            session.user_id = message.sender_id or session.user_id
+            msg_time = float(message.time) if isinstance(message.time, (int, float)) else time.time()
+            session.last_user_message_at = msg_time
+            session.last_activity_at = msg_time
+            session.trigger_type = ""
+            session.trigger_reason = ""
+            session.trigger_at = None
+            session.consecutive_timeout_count = 0
+            if session.waiting_until is not None:
+                session.clear_waiting()
+            content = _message_text(message)
+            session.add_entry(
+                MentalEntry(
+                    event_type="user_message",
+                    content=f"用户发来消息：{content}",
+                    timestamp=msg_time,
+                    metadata={
+                        "message_id": message.message_id,
+                        "sender_id": message.sender_id,
+                        "sender_name": message.sender_name,
+                    },
+                ),
+                max_entries=config.mental.max_log_entries,
+            )
+            await store.save(session)
+
+    async def _on_message_sent(self, message: Message) -> None:
+        """记录 Bot 消息发送。"""
+        store = self.get_store()
+        config = self.get_config()
+        stream_id = message.stream_id
+        if not stream_id:
+            return
+
+        async with store.lock(stream_id):
+            session = await store.get_or_create(stream_id)
+            session.platform = message.platform or session.platform
+            target_user_id = str(message.extra.get("target_user_id") or "")
+            if target_user_id:
+                session.user_id = target_user_id
+            msg_time = float(message.time) if isinstance(message.time, (int, float)) else time.time()
+            session.last_bot_message_at = msg_time
+            session.last_activity_at = msg_time
+            content = _message_text(message)
+            session.add_entry(
+                MentalEntry(
+                    event_type="bot_sent",
+                    content=f"你发送了消息：{content}",
+                    timestamp=msg_time,
+                    metadata={"message_id": message.message_id},
+                ),
+                max_entries=config.mental.max_log_entries,
+            )
+            await store.save(session)
+
+
+def _message_text(message: Message) -> str:
+    """提取消息文本并做轻量裁剪。"""
+    content = message.processed_plain_text
+    if not content:
+        content = message.content if isinstance(message.content, str) else str(message.content)
+    text = " ".join(str(content).split())
+    if len(text) > 180:
+        return text[:180].rstrip() + "..."
+    return text

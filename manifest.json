@@ -1,0 +1,56 @@
+{
+  "name": "ndfc_kokoro_bridge",
+  "display_name": "NDFC 心理增强桥接",
+  "version": "1.0.0",
+  "description": "为 neo_default_chatter 提供 KFC 风格的私聊心理状态、回复等待、预约思考与主动唤醒",
+  "author": "言柒",
+  "license": "AGPL-v3.0",
+  "categories": ["chat"],
+  "tags": ["neo_default_chatter", "kokoro", "private_chat", "mental_state", "bridge"],
+  "dependencies": {
+    "plugins": [
+      "neo_default_chatter"
+    ],
+    "components": [
+      "neo_default_chatter:chatter:neo_default_chatter"
+    ]
+  },
+  "include": [
+    {
+      "component_type": "action",
+      "component_name": "schedule_thought",
+      "dependencies": []
+    },
+    {
+      "component_type": "action",
+      "component_name": "set_reply_wait",
+      "dependencies": []
+    },
+    {
+      "component_type": "event_handler",
+      "component_name": "ndfc_kokoro_message_observer",
+      "dependencies": []
+    },
+    {
+      "component_type": "event_handler",
+      "component_name": "ndfc_kokoro_prompt_state_injector",
+      "dependencies": []
+    },
+    {
+      "component_type": "service",
+      "component_name": "ndfc_kokoro_state",
+      "dependencies": []
+    }
+  ],
+  "entry_point": "plugin.py",
+  "api_version": {
+    "action_api": "1.0.0",
+    "event_api": "1.0.0",
+    "log_api": "1.0.0",
+    "storage_api": "1.0.0",
+    "stream_api": "1.0.0"
+  },
+  "min_core_version": "1.2.0-rc.2",
+  "python_dependencies": [],
+  "dependencies_required": true
+}
