@@ -66,6 +66,9 @@ class NDFCKokoroPromptStateInjector(BaseEventHandler):
         if not stream_id:
             return EventDecision.SUCCESS, params
 
+        # 已确认是 NDFC 的 user prompt 构建事件，登记该流，供消息观察器识别 NDFC 流
+        self.plugin.mark_ndfc_stream(stream_id)  # type: ignore[attr-defined]
+
         # 场景过滤：未启用的场景不注入
         try:
             stream_info = await get_stream_info(stream_id)

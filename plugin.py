@@ -15,6 +15,7 @@ from .actions.memo import MemoAction, MemoDeleteAction
 from .actions.schedule_thought import ScheduleThoughtAction, ScheduleThoughtGroupAction
 from .actions.set_reply_wait import SetReplyWaitAction
 from .config import NDFCKokoroBridgeConfig
+from .handlers.chatter_bound_observer import NDFCKokoroChatterBoundObserver
 from .handlers.context_snapshot_handler import NDFCKokoroContextSnapshotHandler
 from .handlers.message_observer import NDFCKokoroMessageObserver
 from .handlers.prompt_state_injector import NDFCKokoroPromptStateInjector
@@ -32,7 +33,7 @@ class NDFCKokoroBridgePlugin(BasePlugin):
 
     plugin_name: str = "ndfc_kokoro_bridge"
     plugin_description: str = "为 neo_default_chatter 提供完整上下文快照、备忘录、回复等待、预约思考与主动唤醒"
-    plugin_version: str = "2.1.0"
+    plugin_version: str = "2.2.0"
 
     configs: list[type] = [NDFCKokoroBridgeConfig]
     dependent_components: list[str] = ["neo_default_chatter:chatter:neo_default_chatter"]
@@ -51,8 +52,38 @@ class NDFCKokoroBridgePlugin(BasePlugin):
         effective_config = self.get_config()
         self.session_store = BridgeSessionStore(max_entries=effective_config.mental.max_log_entries)
         self.snapshot_store = SnapshotStore()
-        self.scheduler = NDFCKokoroScheduler(effective_config, self.session_store)
+        #: 已被 NDFC 生命周期事件确认为 NDFC 驱动的聊天流集合；
+        #: 消息观察器与调度器仅处理集合内流，避免误处理其他 chatter 的会话。
+        self.ndfc_streams: set[str] = set()
+        self.scheduler = NDFCKokoroScheduler(
+            effective_config,
+            self.session_store,
+            is_ndfc_stream=self.is_ndfc_stream,
+        )
         self._sync_action_descriptions(effective_config)
+
+    def mark_ndfc_stream(self, stream_id: str) -> None:
+        """登记一个由 NDFC 驱动的聊天流。
+
+        由 NDFC 专属生命周期事件（before_llm_request / on_prompt_build）调用，
+        这些事件只有 NDFC 流会触发，因此集合内只会出现 NDFC 流。
+
+        Args:
+            stream_id: 聊天流 ID。
+        """
+        if stream_id:
+            self.ndfc_streams.add(stream_id)
+
+    def is_ndfc_stream(self, stream_id: str) -> bool:
+        """判断指定流是否已登记为 NDFC 驱动。
+
+        Args:
+            stream_id: 聊天流 ID。
+
+        Returns:
+            是否为已登记的 NDFC 流。
+        """
+        return stream_id in self.ndfc_streams
 
     def get_config(self) -> NDFCKokoroBridgeConfig:
         """获取有效配置对象，供本插件所有组件统一调用。"""
@@ -76,6 +107,7 @@ class NDFCKokoroBridgePlugin(BasePlugin):
             NDFCKokoroContextSnapshotHandler,
             NDFCKokoroPromptStateInjector,
             NDFCKokoroMessageObserver,
+            NDFCKokoroChatterBoundObserver,
             NDFCKokoroStateService,
         ]
 

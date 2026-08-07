@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from src.app.plugin_system.api.log_api import get_logger
@@ -31,6 +32,7 @@ class NDFCKokoroScheduler:
         config: NDFCKokoroBridgeConfig,
         store: BridgeSessionStore,
         state_service: Any = None,
+        is_ndfc_stream: Callable[[str], bool] | None = None,
     ) -> None:
         """初始化调度器封装。
 
@@ -38,10 +40,12 @@ class NDFCKokoroScheduler:
             config: 插件配置。
             store: 会话存储。
             state_service: 状态服务实例，用于触发后同步长期 system reminder。
+            is_ndfc_stream: 判断指定流是否仍由 NDFC 驱动的回调；为 None 时不做过滤。
         """
         self._config = config
         self._store = store
         self._state_service = state_service
+        self._is_ndfc_stream = is_ndfc_stream
 
     async def start(self) -> None:
         """启动周期检查任务。"""
@@ -73,6 +77,10 @@ class NDFCKokoroScheduler:
         stream_ids: set[str] = set(self._store.get_all_cached().keys())
         stream_ids.update(await self._store.list_all_stream_ids())
         for stream_id in stream_ids:
+            # 仅处理仍由 NDFC 驱动的流；已被配置为其他 chatter 的流不触发唤醒，
+            # 避免向非 NDFC 流注入插件状态或唤醒错误会话。
+            if self._is_ndfc_stream is not None and not self._is_ndfc_stream(stream_id):
+                continue
             await self._check_one(stream_id)
 
     def _is_scene_enabled(self, chat_type: str) -> bool:
@@ -173,8 +181,10 @@ class NDFCKokoroScheduler:
             logger.info(f"NDFC Kokoro Bridge 已唤醒 stream={stream_id[:8]} trigger={trigger_type}")
 
         # 触发后预约可能已被清空，重新同步长期状态到 system reminder
-        sync = getattr(self._state_service, "sync_long_term_reminder", None)
-        if callable(sync):
+        sync: Callable[[str], Awaitable[object]] | None = getattr(
+            self._state_service, "sync_long_term_reminder", None
+        )
+        if sync is not None:
             await sync(stream_id)
 
     def _should_trigger_silence(

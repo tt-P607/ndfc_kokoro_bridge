@@ -52,6 +52,11 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
         if not isinstance(message, Message):
             return EventDecision.PASS, params
 
+        # 仅处理已由 NDFC 生命周期事件登记的流，避免为其他 chatter（如 KFC）
+        # 的会话误建状态；未登记即视为非 NDFC 流，不创建任何数据。
+        if not self.plugin.is_ndfc_stream(message.stream_id):  # type: ignore[attr-defined]
+            return EventDecision.SUCCESS, params
+
         chat_type = str(getattr(message.chat_type, "value", message.chat_type))
         if not config.plugin.is_scene_enabled(chat_type):
             return EventDecision.SUCCESS, params

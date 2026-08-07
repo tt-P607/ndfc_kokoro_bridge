@@ -14,6 +14,7 @@ from plugins.ndfc_kokoro_bridge.actions.schedule_thought import (
 )
 from plugins.ndfc_kokoro_bridge.actions.set_reply_wait import SetReplyWaitAction
 from plugins.ndfc_kokoro_bridge.config import NDFCKokoroBridgeConfig
+from plugins.ndfc_kokoro_bridge.handlers.chatter_bound_observer import NDFCKokoroChatterBoundObserver
 from plugins.ndfc_kokoro_bridge.handlers.context_snapshot_handler import NDFCKokoroContextSnapshotHandler
 from plugins.ndfc_kokoro_bridge.handlers.message_observer import NDFCKokoroMessageObserver
 from plugins.ndfc_kokoro_bridge.handlers.prompt_state_injector import NDFCKokoroPromptStateInjector
@@ -38,6 +39,7 @@ def test_plugin_components_match_manifest_enabled_components() -> None:
         NDFCKokoroContextSnapshotHandler,
         NDFCKokoroPromptStateInjector,
         NDFCKokoroMessageObserver,
+        NDFCKokoroChatterBoundObserver,
         NDFCKokoroStateService,
     ]
 

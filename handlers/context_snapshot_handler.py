@@ -102,6 +102,9 @@ class NDFCKokoroContextSnapshotHandler(BaseEventHandler):
             logger.debug("快照：请求缺少 stream_id，跳过")
             return EventDecision.SUCCESS, params
 
+        # 已确认是 NDFC 请求，登记该流，供消息观察器识别 NDFC 流
+        self.plugin.mark_ndfc_stream(stream_id)  # type: ignore[attr-defined]
+
         store = self.get_snapshot_store()
 
         # 重启后首次请求：把上次运行的完整上下文链合并回本次请求
