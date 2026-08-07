@@ -1,7 +1,7 @@
 {
   "name": "ndfc_kokoro_bridge",
   "display_name": "NDFC 增强扩展",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "为 neo_default_chatter 提供完整上下文快照、备忘录、回复等待、预约思考与主动唤醒的全场景增强扩展",
   "author": "言柒",
   "license": "AGPL-v3.0",

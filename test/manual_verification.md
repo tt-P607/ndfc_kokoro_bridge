@@ -10,7 +10,7 @@
 2. 诱导模型调用 [`set_reply_wait`](../actions/set_reply_wait.py) 并填写 `thought` 参数，或调用 [`schedule_thought`](../actions/schedule_thought.py) 预约思考。
 3. 下一轮私聊触发 NDFC。
 
-预期：`neo_default_chatter_user_prompt` 的 `values.extra` 中追加"私聊运行状态"，包含近期心理活动记录、等待/预约状态与触发原因。
+预期：`neo_default_chatter_user_prompt` 的 `values.extra` 中追加"私聊运行状态"，包含等待/预约状态与触发原因。
 
 ## 3. 回复等待验证
 

@@ -33,7 +33,7 @@ class NDFCKokoroBridgePlugin(BasePlugin):
 
     plugin_name: str = "ndfc_kokoro_bridge"
     plugin_description: str = "为 neo_default_chatter 提供完整上下文快照、备忘录、回复等待、预约思考与主动唤醒"
-    plugin_version: str = "2.3.0"
+    plugin_version: str = "2.4.0"
 
     configs: list[type] = [NDFCKokoroBridgeConfig]
     dependent_components: list[str] = ["neo_default_chatter:chatter:neo_default_chatter"]
@@ -50,7 +50,7 @@ class NDFCKokoroBridgePlugin(BasePlugin):
         """
         super().__init__(config)  # type: ignore[arg-type]
         effective_config = self.get_config()
-        self.session_store = BridgeSessionStore(max_entries=effective_config.mental.max_log_entries)
+        self.session_store = BridgeSessionStore()
         self.snapshot_store = SnapshotStore()
         #: 已被 NDFC 生命周期事件确认为 NDFC 驱动的聊天流集合；
         #: 消息观察器与调度器仅处理集合内流，避免误处理其他 chatter 的会话。

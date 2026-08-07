@@ -1,7 +1,6 @@
 """NDFC Kokoro Bridge 消息观察处理器。
 
-监听消息接收与发送事件，维护聊天流的最近活动时间、等待状态、场景类型
-和心理活动摘要。
+监听消息接收与发送事件，维护聊天流的最近活动时间、等待状态与场景类型。
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from src.app.plugin_system.base import BaseEventHandler
 from src.app.plugin_system.types import EventType, Message
 
 from ..config import NDFCKokoroBridgeConfig
-from ..models import MentalEntry
 from ..store import BridgeSessionStore
 
 logger = get_logger("ndfc_kokoro_bridge.message")
@@ -77,7 +75,6 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
             chat_type: 聊天场景。
         """
         store = self.get_store()
-        config = self.get_config()
         stream_id = message.stream_id
         if not stream_id:
             return
@@ -98,20 +95,6 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
             session.consecutive_timeout_count = 0
             if session.waiting_until is not None:
                 session.clear_waiting()
-            content = _message_text(message)
-            session.add_entry(
-                MentalEntry(
-                    event_type="user_message",
-                    content=f"用户发来消息：{content}",
-                    timestamp=msg_time,
-                    metadata={
-                        "message_id": message.message_id,
-                        "sender_id": message.sender_id,
-                        "sender_name": message.sender_name,
-                    },
-                ),
-                max_entries=config.mental.max_log_entries,
-            )
             await store.save(session)
 
     async def _on_message_sent(self, message: Message, chat_type: str) -> None:
@@ -122,7 +105,6 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
             chat_type: 聊天场景。
         """
         store = self.get_store()
-        config = self.get_config()
         stream_id = message.stream_id
         if not stream_id:
             return
@@ -138,25 +120,4 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
             msg_time = float(message.time) if isinstance(message.time, (int, float)) else time.time()
             session.last_bot_message_at = msg_time
             session.last_activity_at = msg_time
-            content = _message_text(message)
-            session.add_entry(
-                MentalEntry(
-                    event_type="bot_sent",
-                    content=f"你发送了消息：{content}",
-                    timestamp=msg_time,
-                    metadata={"message_id": message.message_id},
-                ),
-                max_entries=config.mental.max_log_entries,
-            )
             await store.save(session)
-
-
-def _message_text(message: Message) -> str:
-    """提取消息文本并做轻量裁剪。"""
-    content = message.processed_plain_text
-    if not content:
-        content = message.content if isinstance(message.content, str) else str(message.content)
-    text = " ".join(str(content).split())
-    if len(text) > 180:
-        return text[:180].rstrip() + "..."
-    return text

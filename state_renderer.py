@@ -1,7 +1,7 @@
 """NDFC Kokoro Bridge 运行时状态渲染。
 
 本模块把 BridgeSession 转换为可追加到 neo_default_chatter user prompt extra
-的事实状态块：当前场景、等待、预约、备忘录、触发原因与近期心理活动。
+的事实状态块：当前场景、等待、预约、备忘录与触发原因。
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 
 from .config import NDFCKokoroBridgeConfig
-from .models import BridgeSession, MentalEntry
+from .models import BridgeSession
 from .models import SCENE_PRIVATE
 
 _SCENE_LABELS = {
@@ -23,9 +23,9 @@ _SCENE_LABELS = {
 def render_user_extra(session: BridgeSession, config: NDFCKokoroBridgeConfig) -> str:
     """渲染可注入 NDFC user prompt extra 的即时运行状态。
 
-    仅包含会随轮次动态变化的即时事实：场景、最近消息间隔、回复等待、
-    触发原因与近期心理活动。稳定长期状态（预约、备忘）走 system reminder，
-    不在此注入，避免在 user prompt 前缀引入动态内容破坏缓存。
+    仅包含会随轮次动态变化的即时事实：场景、最近消息间隔、回复等待与
+    触发原因。稳定长期状态（预约、备忘）走 system reminder，不在此注入，
+    避免在 user prompt 前缀引入动态内容破坏缓存。
 
     Args:
         session: 当前流状态。
@@ -74,12 +74,6 @@ def render_user_extra(session: BridgeSession, config: NDFCKokoroBridgeConfig) ->
             lines.append(f"- 触发类型：{session.trigger_type}")
         if session.trigger_reason:
             lines.append(f"- 触发原因：{session.trigger_reason}")
-
-    recent_entries = _recent_entries(session, config)
-    if recent_entries:
-        lines.extend(["", prompt_config.mental_log_title])
-        for entry in recent_entries:
-            lines.append(f"- [{_format_time(entry.timestamp)}] {entry.event_type}: {_truncate(entry.content, config.mental.max_entry_chars)}")
 
     # 动态时间信息放最后，避免频繁变化的内容破坏 user prompt 前缀缓存
     if session.last_user_message_at is not None:
@@ -140,22 +134,6 @@ def _valid_memos(session: BridgeSession) -> list:
     """
     now = time.time()
     return [memo for memo in session.memos if not memo.is_expired(now)]
-
-
-def _recent_entries(session: BridgeSession, config: NDFCKokoroBridgeConfig) -> list[MentalEntry]:
-    """获取需要注入的近期心理活动。
-
-    Args:
-        session: 当前流状态。
-        config: 插件配置。
-
-    Returns:
-        需要注入的心理活动列表。
-    """
-    count = max(0, int(config.mental.inject_recent_entries))
-    if count <= 0:
-        return []
-    return session.mental_entries[-count:]
 
 
 def _format_delta(seconds: float) -> str:

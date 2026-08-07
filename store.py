@@ -24,15 +24,10 @@ _INDEX_KEY = "_index"
 class BridgeSessionStore:
     """BridgeSession 的 JSON 持久化存储。"""
 
-    def __init__(self, max_entries: int = 50) -> None:
-        """初始化会话存储。
-
-        Args:
-            max_entries: 每个会话保留的最大心理活动条数。
-        """
+    def __init__(self) -> None:
+        """初始化会话存储。"""
         self._sessions: dict[str, BridgeSession] = {}
         self._locks: dict[str, asyncio.Lock] = {}
-        self._max_entries = max_entries
 
     def _get_lock(self, stream_id: str) -> asyncio.Lock:
         """获取指定 stream 的互斥锁。"""
@@ -96,7 +91,7 @@ class BridgeSessionStore:
         if not isinstance(data, dict):
             return None
 
-        session = BridgeSession.from_dict(data, max_entries=self._max_entries)
+        session = BridgeSession.from_dict(data)
         if not session.stream_id:
             session.stream_id = stream_id
         self._sessions[stream_id] = session
@@ -121,7 +116,7 @@ class BridgeSessionStore:
             return None
         if not isinstance(data, dict):
             return None
-        session = BridgeSession.from_dict(data, max_entries=self._max_entries)
+        session = BridgeSession.from_dict(data)
         if not session.stream_id:
             session.stream_id = stream_id
         return session

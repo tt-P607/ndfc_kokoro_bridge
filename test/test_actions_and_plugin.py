@@ -163,11 +163,6 @@ async def test_actions_write_session_state() -> None:
     assert session is not None
     assert session.waiting_reason == "等回答"
     assert session.scheduled_reason == "一分钟后想起"
-    assert session.mental_entries[0].metadata["thought"] == "我有点在意，想看看对方会不会继续解释。"
-    assert [entry.event_type for entry in session.mental_entries] == [
-        "reply_wait_set",
-        "schedule_set",
-    ]
 
 
 @pytest.mark.asyncio
@@ -198,10 +193,9 @@ async def test_set_reply_wait_rejected_at_limit() -> None:
     assert success is False
     assert "已达到连续回复等待上限" in result
 
-    # 验证记录了拒绝事件
     session = await store.get(stream_id)
     assert session is not None
-    assert session.mental_entries[-1].event_type == "reply_wait_rejected"
+    assert session.consecutive_timeout_count == 3
 
     # 尝试取消等待（seconds = 0）应允许
     success_cancel, result_cancel = await wait_action.execute(

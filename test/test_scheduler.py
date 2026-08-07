@@ -22,7 +22,7 @@ async def test_wait_timeout_does_not_allow_cold_start(monkeypatch: pytest.Monkey
     """回复等待是临时状态；运行期超时也不应冷启动私聊流。"""
 
     config = NDFCKokoroBridgeConfig()
-    store = BridgeSessionStore(max_entries=config.mental.max_log_entries)
+    store = BridgeSessionStore()
     scheduler = NDFCKokoroScheduler(config=config, store=store)
     stream_id = _unique_stream_id("wait-timeout")
 
@@ -65,7 +65,7 @@ async def test_scheduled_trigger_allows_configured_cold_start(monkeypatch: pytes
 
     config = NDFCKokoroBridgeConfig()
     config.proactive.wake_cold_stream = True
-    store = BridgeSessionStore(max_entries=config.mental.max_log_entries)
+    store = BridgeSessionStore()
     scheduler = NDFCKokoroScheduler(config=config, store=store)
     stream_id = _unique_stream_id("scheduled-trigger")
 
@@ -107,7 +107,7 @@ async def test_check_all_sessions_skips_non_ndfc_stream(monkeypatch: pytest.Monk
     """已配置为其他 chatter 的流不应被调度器触发唤醒。"""
 
     config = NDFCKokoroBridgeConfig()
-    store = BridgeSessionStore(max_entries=config.mental.max_log_entries)
+    store = BridgeSessionStore()
 
     ndfc_stream = _unique_stream_id("ndfc")
     non_ndfc_stream = _unique_stream_id("non-ndfc")

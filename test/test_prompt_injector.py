@@ -6,7 +6,6 @@ import pytest
 
 from plugins.ndfc_kokoro_bridge.config import NDFCKokoroBridgeConfig
 from plugins.ndfc_kokoro_bridge.handlers.prompt_state_injector import NDFCKokoroPromptStateInjector
-from plugins.ndfc_kokoro_bridge.models import MentalEntry
 from plugins.ndfc_kokoro_bridge.plugin import NDFCKokoroBridgePlugin
 from plugins.ndfc_kokoro_bridge.store import BridgeSessionStore
 from src.app.plugin_system.api.event_api import EventDecision
@@ -32,7 +31,6 @@ async def test_prompt_state_injector_appends_extra_for_private_stream(
     assert isinstance(store, BridgeSessionStore)
     async with store.lock("stream-prompt"):
         session = await store.get_or_create("stream-prompt")
-        session.add_entry(MentalEntry(event_type="inner_thought", content="刚才有点犹豫"), max_entries=10)
         await store.save(session)
 
     handler = NDFCKokoroPromptStateInjector(plugin=plugin)
@@ -49,7 +47,6 @@ async def test_prompt_state_injector_appends_extra_for_private_stream(
     assert "已有额外信息" in extra
     assert "# 运行状态" in extra
     assert "- 当前场景：私聊" in extra
-    assert "刚才有点犹豫" in extra
 
 
 @pytest.mark.asyncio

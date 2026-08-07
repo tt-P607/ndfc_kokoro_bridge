@@ -1,7 +1,7 @@
 """NDFC Kokoro Bridge 状态模型。
 
 本模块定义插件维护的聊天流运行状态：回复等待、预约思考、主动触发记录、
-近期心理活动流、私人备忘录与完整上下文快照。
+私人备忘录与完整上下文快照。
 
 对话消息由框架持久化；本插件额外维护 NDFC 每轮真正发送给模型的完整
 payload 链（系统提示、历史、工具调用、工具结果、推理），作为可跨重启
@@ -46,54 +46,11 @@ MEMO_ID_LENGTH: int = 6
 
 
 @dataclass
-class MentalEntry:
-    """单条心理活动或运行事件记录。"""
-
-    event_type: str
-    content: str
-    timestamp: float = field(default_factory=time.time)
-    metadata: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        """序列化为字典。
-
-        Returns:
-            可写入 JSON 的字典。
-        """
-        return {
-            "event_type": self.event_type,
-            "content": self.content,
-            "timestamp": self.timestamp,
-            "metadata": self.metadata,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "MentalEntry":
-        """从字典反序列化心理活动记录。
-
-        Args:
-            data: JSON 字典。
-
-        Returns:
-            MentalEntry 实例。
-        """
-        metadata = data.get("metadata", {})
-        if not isinstance(metadata, dict):
-            metadata = {}
-        return cls(
-            event_type=str(data.get("event_type", "unknown")),
-            content=str(data.get("content", "")),
-            timestamp=float(data.get("timestamp", time.time())),
-            metadata=metadata,
-        )
-
-
-@dataclass
 class Memo:
     """一条带过期时间的私人备忘录。
 
-    定位为 LLM 显式标记的中短期关键事项，与心理活动流（自动事件）互补，
-    覆盖"接下来一段时间需要明确意识到的事"这一语义层。
+    定位为 LLM 显式标记的中短期关键事项，覆盖"接下来一段时间需要明确
+    意识到的事"这一语义层。
     """
 
     content: str = ""
@@ -306,7 +263,6 @@ class BridgeSession:
     trigger_reason: str = ""
     trigger_type: str = ""
     trigger_at: float | None = None
-    mental_entries: list[MentalEntry] = field(default_factory=list)
     memos: list[Memo] = field(default_factory=list)
 
     def is_waiting(self, now: float | None = None) -> bool:
@@ -376,17 +332,6 @@ class BridgeSession:
         self.last_activity_at = now
         if trigger_type in {"scheduled", "silence", "wait_timeout"}:
             self.last_proactive_at = now
-
-    def add_entry(self, entry: MentalEntry, max_entries: int) -> None:
-        """追加心理活动并裁剪最大长度。
-
-        Args:
-            entry: 待追加记录。
-            max_entries: 保留的最大记录数量。
-        """
-        self.mental_entries.append(entry)
-        if max_entries > 0 and len(self.mental_entries) > max_entries:
-            self.mental_entries = self.mental_entries[-max_entries:]
 
     # ── 备忘录管理 ──────────────────────────────────────────
 
@@ -478,17 +423,15 @@ class BridgeSession:
             "trigger_reason": self.trigger_reason,
             "trigger_type": self.trigger_type,
             "trigger_at": self.trigger_at,
-            "mental_entries": [entry.to_dict() for entry in self.mental_entries],
             "memos": [memo.to_dict() for memo in self.memos],
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any], max_entries: int = 50) -> "BridgeSession":
+    def from_dict(cls, data: dict[str, Any]) -> "BridgeSession":
         """从 JSON 字典反序列化会话状态。
 
         Args:
             data: JSON 字典。
-            max_entries: 心理活动最大条目数。
 
         Returns:
             BridgeSession 实例。
@@ -510,13 +453,6 @@ class BridgeSession:
         session.trigger_reason = str(data.get("trigger_reason", ""))
         session.trigger_type = str(data.get("trigger_type", ""))
         session.trigger_at = _optional_float(data.get("trigger_at"))
-        raw_entries = data.get("mental_entries", [])
-        if isinstance(raw_entries, list):
-            session.mental_entries = [
-                MentalEntry.from_dict(item)
-                for item in raw_entries
-                if isinstance(item, dict)
-            ]
         raw_memos = data.get("memos", []) or []
         if isinstance(raw_memos, list):
             session.memos = [
@@ -524,8 +460,6 @@ class BridgeSession:
                 for item in raw_memos
                 if isinstance(item, dict)
             ]
-        if max_entries > 0 and len(session.mental_entries) > max_entries:
-            session.mental_entries = session.mental_entries[-max_entries:]
         return session
 
 

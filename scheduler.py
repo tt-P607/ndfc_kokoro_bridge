@@ -15,7 +15,6 @@ from src.app.plugin_system.api.log_api import get_logger
 from src.kernel.scheduler import TriggerType, get_unified_scheduler
 
 from .config import NDFCKokoroBridgeConfig
-from .models import MentalEntry
 from .store import BridgeSessionStore
 from .wake import wake_stream
 
@@ -160,14 +159,6 @@ class NDFCKokoroScheduler:
                 return
 
             session.mark_trigger(trigger_type, reason)
-            session.add_entry(
-                MentalEntry(
-                    event_type=f"{trigger_type}_trigger",
-                    content=reason,
-                    metadata={"trigger_type": trigger_type},
-                ),
-                max_entries=self._config.mental.max_log_entries,
-            )
             await self._store.save(session)
 
         success = await wake_stream(

@@ -69,14 +69,6 @@ class NDFCKokoroBridgeConfig(BaseConfig):
         max_expire_hours: float = Field(default=336.0, description="最大过期时长（小时）")
         default_expire_hours: float = Field(default=24.0, description="默认过期时长（小时）")
 
-    @config_section("mental")
-    class MentalSection(SectionBase):
-        """心理活动记录配置。"""
-
-        max_log_entries: int = Field(default=50, description="每个聊天流保留的最大心理活动条数")
-        inject_recent_entries: int = Field(default=6, description="每次注入最近多少条心理活动")
-        max_entry_chars: int = Field(default=240, description="单条心理活动注入时的最大字符数")
-
     @config_section("wait")
     class WaitSection(SectionBase):
         """回复等待配置。"""
@@ -287,7 +279,6 @@ class NDFCKokoroBridgeConfig(BaseConfig):
             description="状态注入块开头说明",
         )
         current_state_title: str = Field(default="## 当前状态", description="当前状态小标题")
-        mental_log_title: str = Field(default="## 近期心理活动记录", description="心理活动记录小标题")
         memo_title: str = Field(default="## 备忘录", description="备忘录小标题")
         trigger_title: str = Field(default="## 当前触发原因", description="触发原因小标题")
         scene_line: str = Field(default="- 当前场景：{scene}", description="场景事实提示行，支持 {scene} 占位符")
@@ -311,7 +302,6 @@ class NDFCKokoroBridgeConfig(BaseConfig):
     plugin: PluginSection = Field(default_factory=PluginSection)
     snapshot: SnapshotSection = Field(default_factory=SnapshotSection)
     memo: MemoSection = Field(default_factory=MemoSection)
-    mental: MentalSection = Field(default_factory=MentalSection)
     wait: WaitSection = Field(default_factory=WaitSection)
     proactive: ProactiveSection = Field(default_factory=ProactiveSection)
     action_prompt: ActionPromptSection = Field(default_factory=ActionPromptSection)
