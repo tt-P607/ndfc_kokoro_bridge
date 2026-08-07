@@ -114,3 +114,56 @@ async def test_message_observer_skips_non_ndfc_stream() -> None:
     assert decision is EventDecision.SUCCESS
     session = await store.get(stream_id)
     assert session is None
+
+
+@pytest.mark.asyncio
+async def test_group_message_does_not_override_user_id() -> None:
+    """群聊消息不应把 sender_id 写入 user_id（群聊没有唯一 user_id）。"""
+
+    plugin = NDFCKokoroBridgePlugin(config=NDFCKokoroBridgeConfig())
+    store = getattr(plugin, "session_store")
+    assert isinstance(store, BridgeSessionStore)
+    stream_id = _unique_stream_id("group-userid")
+    plugin.mark_ndfc_stream(stream_id)  # type: ignore[attr-defined]
+
+    # 首次群聊消息：user_id 应为空，而非 sender_id
+    handler = NDFCKokoroMessageObserver(plugin=plugin)
+    message = _make_message(
+        stream_id,
+        chat_type="group",
+        message_id="msg-group-1",
+    )
+
+    decision, _ = await handler.execute(EventType.ON_MESSAGE_RECEIVED.value, {"message": message})
+
+    assert decision is EventDecision.SUCCESS
+    session = await store.get(stream_id)
+    assert session is not None
+    assert session.chat_type == "group"
+    assert session.user_id == ""
+
+
+@pytest.mark.asyncio
+async def test_private_message_sets_user_id() -> None:
+    """私聊消息应把 sender_id 写入 user_id。"""
+
+    plugin = NDFCKokoroBridgePlugin(config=NDFCKokoroBridgeConfig())
+    store = getattr(plugin, "session_store")
+    assert isinstance(store, BridgeSessionStore)
+    stream_id = _unique_stream_id("private-userid")
+    plugin.mark_ndfc_stream(stream_id)  # type: ignore[attr-defined]
+
+    handler = NDFCKokoroMessageObserver(plugin=plugin)
+    message = _make_message(
+        stream_id,
+        chat_type="private",
+        message_id="msg-private-1",
+    )
+
+    decision, _ = await handler.execute(EventType.ON_MESSAGE_RECEIVED.value, {"message": message})
+
+    assert decision is EventDecision.SUCCESS
+    session = await store.get(stream_id)
+    assert session is not None
+    assert session.chat_type == "private"
+    assert session.user_id == "user-1"

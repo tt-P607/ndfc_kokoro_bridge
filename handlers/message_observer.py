@@ -85,7 +85,9 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
         async with store.lock(stream_id):
             session = await store.get_or_create(stream_id)
             session.platform = message.platform or session.platform
-            session.user_id = message.sender_id or session.user_id
+            # user_id 仅在私聊流有意义（群聊没有唯一 user_id）；群聊保持原值不覆盖
+            if chat_type == "private":
+                session.user_id = message.sender_id or session.user_id
             session.chat_type = chat_type or session.chat_type
             msg_time = float(message.time) if isinstance(message.time, (int, float)) else time.time()
             session.last_user_message_at = msg_time
@@ -129,8 +131,9 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
             session = await store.get_or_create(stream_id)
             session.platform = message.platform or session.platform
             session.chat_type = chat_type or session.chat_type
+            # user_id 仅在私聊流有意义；群聊保持原值不覆盖
             target_user_id = str(message.extra.get("target_user_id") or "")
-            if target_user_id:
+            if chat_type == "private" and target_user_id:
                 session.user_id = target_user_id
             msg_time = float(message.time) if isinstance(message.time, (int, float)) else time.time()
             session.last_bot_message_at = msg_time
