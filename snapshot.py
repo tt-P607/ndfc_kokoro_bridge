@@ -15,6 +15,7 @@ payload 链（user / assistant / tool_result）合并回请求，实现上下文
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any
 
@@ -107,7 +108,12 @@ def serialize_payloads(payloads: list[Any]) -> list[SnapshotEntry]:
             if part_type in ("Text", "ReasoningText"):
                 text = _safe_text(getattr(part, "text", ""))
                 if text:
-                    content_parts.append(text)
+                    # 剥离框架动态注入的 system_reminder 块，防止超长 reminder
+                    # 占满条目预算、截断尾部的用户新消息
+                    if role == SNAPSHOT_ROLE_USER:
+                        text = _strip_system_reminders(text)
+                    if text:
+                        content_parts.append(text)
             elif part_type == "ToolCall":
                 tool_calls.append(_serialize_tool_call(part))
             elif part_type == "ToolResult":
@@ -436,6 +442,32 @@ def _truncate(text: str) -> str:
     if len(text) <= _MAX_ENTRY_CHARS:
         return text
     return text[:_MAX_ENTRY_CHARS].rstrip() + "..."
+
+
+#: 匹配 user 文本中框架动态注入的 system_reminder 块（含标签本身）。
+#: 这些 reminder 由 LLMContextManager 在每次请求时重新注入，不属于对话历史，
+#: 快照保存时应剥离，避免超长 reminder 挤占条目预算、截断尾部的用户新消息。
+_SYSTEM_REMINDER_RE = re.compile(
+    r"<system_reminder>.*?</system_reminder>",
+    flags=re.DOTALL,
+)
+
+
+def _strip_system_reminders(text: str) -> str:
+    """从 user 文本中剥离框架动态注入的 system_reminder 块。
+
+    剥离后剩余内容为真正的对话文本（历史摘要、新收到的消息等），
+    恢复时 NDFC 会通过 :class:`LLMContextManager` 重新注入 reminder，
+    因此快照无需持久化这部分动态内容。
+
+    Args:
+        text: 原始 user 文本。
+
+    Returns:
+        剥离 system_reminder 块后的文本。
+    """
+    stripped = _SYSTEM_REMINDER_RE.sub("", text)
+    return stripped.strip()
 
 
 def _merge_consecutive(entries: list[SnapshotEntry]) -> list[SnapshotEntry]:

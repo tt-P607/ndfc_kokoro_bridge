@@ -56,6 +56,46 @@ def test_serialize_payloads_round_trip() -> None:
     assert tool_result.content == "已发送"
 
 
+def test_serialize_payloads_strips_system_reminder_from_user() -> None:
+    """user 文本中的 system_reminder 块应被剥离，保留真正的对话内容。"""
+    payloads = [
+        LLMPayload(
+            ROLE.USER,
+            Text(
+                "<system_reminder>\n[image_generator_rule]\n【生图规则】...\n"
+                "</system_reminder>\n# 新收到的消息\n@爱莉 你好"
+            ),
+        ),
+    ]
+
+    entries = serialize_payloads(payloads)
+
+    user_entry = next(e for e in entries if e.role == "user")
+    assert "<system_reminder>" not in user_entry.content
+    assert "[image_generator_rule]" not in user_entry.content
+    assert "# 新收到的消息" in user_entry.content
+    assert "@爱莉 你好" in user_entry.content
+
+
+def test_serialize_payloads_keeps_tail_new_messages_with_long_reminder() -> None:
+    """超长 system_reminder 被剥离后，尾部新消息不应被截断丢失。"""
+    long_reminder = (
+        "<system_reminder>\n" + ("【生图规则内容】" * 2000) + "\n</system_reminder>"
+    )
+    payloads = [
+        LLMPayload(
+            ROLE.USER,
+            Text(long_reminder + "\n# 新收到的消息\n重启后刚来的关键消息"),
+        ),
+    ]
+
+    entries = serialize_payloads(payloads)
+
+    user_entry = next(e for e in entries if e.role == "user")
+    assert "重启后刚来的关键消息" in user_entry.content
+    assert "<system_reminder>" not in user_entry.content
+
+
 def test_capture_snapshot_and_round_trip() -> None:
     """快照应能序列化、反序列化并保留结构。"""
     payloads = [
