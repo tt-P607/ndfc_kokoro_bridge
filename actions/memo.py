@@ -1,0 +1,190 @@
+"""NDFC Kokoro Bridge 备忘录 Action。
+
+提供 ``memo``（写入或刷新）与 ``memo_delete``（按 id 删除）两个工具，
+让 neo_default_chatter 显式标记"接下来一段时间需要明确意识到的事"。
+
+备忘录随会话一起持久化；渲染时作为状态注入的一部分展示，不进对话链。
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Annotated
+
+from src.app.plugin_system.base import BaseAction
+from src.app.plugin_system.types import ChatType
+
+from ..config import NDFCKokoroBridgeConfig
+from ..models import (
+    MEMO_DEFAULT_EXPIRE_HOURS,
+    MEMO_MAX_ENTRIES,
+    MEMO_MAX_EXPIRE_HOURS,
+    MEMO_MIN_EXPIRE_HOURS,
+    Memo,
+    clamp_expire_hours,
+)
+from ..services.state_service import NDFCKokoroStateService
+
+_SECONDS_PER_HOUR = 3600.0
+
+_MEMO_DESCRIPTION = (
+    "记录一条带过期时间的私人备忘录。"
+    "备忘条目会自动渲染到提示词末尾，让你保持对它的意识，"
+    "但不需要时刻提起或反复念叨——只在恰当的时机自然地用上。\n\n"
+    f"`expire_hours` 范围：{MEMO_MIN_EXPIRE_HOURS:g}~{MEMO_MAX_EXPIRE_HOURS:g}"
+    f"（{MEMO_MIN_EXPIRE_HOURS:g} 小时至 {int(MEMO_MAX_EXPIRE_HOURS / 24)} 天）；"
+    f"超出会自动夹到边界。默认 {MEMO_DEFAULT_EXPIRE_HOURS:g} 小时。\n"
+    f"同时最多保留 {MEMO_MAX_ENTRIES} 条；超过会自动淘汰创建最早的。\n"
+    "已有 content 完全相同的备忘会自动刷新过期时间，不会重复创建。\n\n"
+    "**用途定位（语义比较宽，不必拘泥）：**\n"
+    "- 对方提到的待办、约定、需要兑现的承诺\n"
+    "- 当前需要避开 / 留意的话题或情绪状态\n"
+    "- 对当前关系状态的小观察\n"
+    "- 未来想问对方的问题、想分享的事\n"
+    "只要你觉得「过几个小时或几天后回看时还想知道这件事」，就可以记。\n\n"
+    "**重要：** 当某条备忘对应的事情已经做了 / 兑现了 / 不再相关时，"
+    "请主动使用 `action-memo_delete` 删除它，避免备忘录和实际状态对不上。"
+    "过期时间只是兜底，不要依赖它。"
+)
+
+_MEMO_DELETE_DESCRIPTION = (
+    "删除一条或多条已不再需要的备忘录。\n"
+    "**典型场景：你看到备忘录里某条事情你刚刚已经做了/兑现了/不再相关了，"
+    "就主动调用此工具删掉它，避免脑门便签和实际状态对不上。**\n"
+    "`memo_ids`：从备忘录显示中读取的 id 列表（每条备忘渲染时都会显示其 id）。"
+)
+
+
+class MemoAction(BaseAction):
+    """写入或刷新一条私人备忘录。"""
+
+    name: str = "memo"
+    description: str = _MEMO_DESCRIPTION
+    chatter_allow: list[str] = ["neo_default_chatter"]
+    associated_types: list[str] = ["text"]
+    chat_type: ChatType = ChatType.ALL
+
+    async def go_activate(self) -> bool:
+        """根据配置和聊天类型决定是否暴露 Action。"""
+        config = self.plugin.config
+        if isinstance(config, NDFCKokoroBridgeConfig):
+            return bool(config.plugin.enabled and config.memo.enabled)
+        return True
+
+    async def execute(
+        self,
+        content: Annotated[
+            str,
+            "备忘的核心内容。建议简洁明了，几十字以内描述清楚要记的事。",
+        ],
+        intent: Annotated[
+            str,
+            "为什么记这条 / 未来看到时希望提醒自己什么。"
+            "建议填写，让未来的你看到时更容易理解它的意义。",
+        ] = "",
+        expire_hours: Annotated[
+            float,
+            f"备忘的存活时长（小时）。范围 "
+            f"{MEMO_MIN_EXPIRE_HOURS:g}~{MEMO_MAX_EXPIRE_HOURS:g}，"
+            f"默认 {MEMO_DEFAULT_EXPIRE_HOURS:g}。超出会被夹到边界。",
+        ] = MEMO_DEFAULT_EXPIRE_HOURS,
+        reason: Annotated[
+            str,
+            "此刻你想记下这条备忘的真实想法（可留空）。仅用于审计，不参与渲染。",
+        ] = "",
+    ) -> tuple[bool, str]:
+        """写入或刷新一条备忘录。
+
+        Args:
+            content: 备忘正文。
+            intent: 记录动机。
+            expire_hours: 存活时长（小时）。
+            reason: 审计用的调用理由。
+
+        Returns:
+            tuple: ``(是否成功, 回执描述)``。
+        """
+        _ = reason
+        normalized_content = content.strip()
+        if not normalized_content:
+            return False, "content 不能为空"
+
+        clamped_hours = clamp_expire_hours(expire_hours)
+        now = time.time()
+        new_memo = Memo(
+            content=normalized_content,
+            intent=intent.strip(),
+            created_at=now,
+            expires_at=now + clamped_hours * _SECONDS_PER_HOUR,
+        )
+
+        service = NDFCKokoroStateService(plugin=self.plugin)
+        stream_id = self.chat_stream.stream_id
+        saved_memo, is_new, message = await service.upsert_memo(
+            stream_id=stream_id,
+            memo=new_memo,
+        )
+        if saved_memo is None:
+            return False, message or "无法写入备忘"
+
+        action_word = "已记下" if is_new else "已刷新"
+        return True, (
+            f"{action_word}备忘（id={saved_memo.memo_id}，"
+            f"约 {clamped_hours:g} 小时后过期）"
+        )
+
+
+class MemoDeleteAction(BaseAction):
+    """按 id 删除一条或多条备忘录。"""
+
+    name: str = "memo_delete"
+    description: str = _MEMO_DELETE_DESCRIPTION
+    chatter_allow: list[str] = ["neo_default_chatter"]
+    associated_types: list[str] = ["text"]
+    chat_type: ChatType = ChatType.ALL
+
+    async def go_activate(self) -> bool:
+        """根据配置和聊天类型决定是否暴露 Action。"""
+        config = self.plugin.config
+        if isinstance(config, NDFCKokoroBridgeConfig):
+            return bool(config.plugin.enabled and config.memo.enabled)
+        return True
+
+    async def execute(
+        self,
+        memo_ids: Annotated[
+            list[str],
+            "要删除的备忘 id 列表。从备忘录渲染中读取（每条都会显示其 id）。",
+        ],
+        reason: Annotated[
+            str,
+            "此刻删除这些备忘的真实想法（可留空）。仅用于审计，不参与渲染。",
+        ] = "",
+    ) -> tuple[bool, str]:
+        """删除指定 id 的备忘。
+
+        Args:
+            memo_ids: 待删除的备忘 id 列表。
+            reason: 审计用的调用理由。
+
+        Returns:
+            tuple: ``(是否成功, 回执描述)``。
+        """
+        _ = reason
+        if not memo_ids:
+            return False, "memo_ids 不能为空"
+
+        # 模型偶尔会传单个字符串而非列表
+        if isinstance(memo_ids, str):
+            target_ids = [memo_ids.strip()] if memo_ids.strip() else []
+        else:
+            target_ids = [str(item).strip() for item in memo_ids if str(item).strip()]
+        if not target_ids:
+            return False, "memo_ids 解析后为空"
+
+        service = NDFCKokoroStateService(plugin=self.plugin)
+        stream_id = self.chat_stream.stream_id
+        deleted = await service.delete_memos(stream_id=stream_id, memo_ids=target_ids)
+        if not deleted:
+            return False, "没有找到匹配的备忘"
+        return True, f"已删除 {len(deleted)} 条备忘"

@@ -7,9 +7,14 @@ from uuid import uuid4
 
 import pytest
 
-from plugins.ndfc_kokoro_bridge.actions.schedule_thought import ScheduleThoughtAction
+from plugins.ndfc_kokoro_bridge.actions.memo import MemoAction, MemoDeleteAction
+from plugins.ndfc_kokoro_bridge.actions.schedule_thought import (
+    ScheduleThoughtAction,
+    ScheduleThoughtGroupAction,
+)
 from plugins.ndfc_kokoro_bridge.actions.set_reply_wait import SetReplyWaitAction
 from plugins.ndfc_kokoro_bridge.config import NDFCKokoroBridgeConfig
+from plugins.ndfc_kokoro_bridge.handlers.context_snapshot_handler import NDFCKokoroContextSnapshotHandler
 from plugins.ndfc_kokoro_bridge.handlers.message_observer import NDFCKokoroMessageObserver
 from plugins.ndfc_kokoro_bridge.handlers.prompt_state_injector import NDFCKokoroPromptStateInjector
 from plugins.ndfc_kokoro_bridge.plugin import NDFCKokoroBridgePlugin
@@ -25,8 +30,12 @@ def test_plugin_components_match_manifest_enabled_components() -> None:
     plugin = NDFCKokoroBridgePlugin(config=NDFCKokoroBridgeConfig())
 
     assert plugin.get_components() == [
+        MemoAction,
+        MemoDeleteAction,
         ScheduleThoughtAction,
+        ScheduleThoughtGroupAction,
         SetReplyWaitAction,
+        NDFCKokoroContextSnapshotHandler,
         NDFCKokoroPromptStateInjector,
         NDFCKokoroMessageObserver,
         NDFCKokoroStateService,
@@ -44,52 +53,81 @@ def test_plugin_components_empty_when_disabled() -> None:
 
 
 def test_plugin_syncs_action_descriptions_from_config() -> None:
-    """插件应把配置中的 Action 文案同步到组件类。"""
+    """插件应把配置中的 Action 文案同步到组件类（私聊版与群聊版）。"""
 
     config = NDFCKokoroBridgeConfig()
     config.action_prompt.set_reply_wait_description = "自定义等待工具说明"
     config.action_prompt.schedule_thought_description = "自定义预约工具说明"
     config.action_prompt.schedule_guidance = "自定义预约指导"
+    config.action_prompt.schedule_thought_group_description = "自定义群聊预约工具说明"
+    config.action_prompt.schedule_guidance_group = "自定义群聊预约指导"
 
     NDFCKokoroBridgePlugin(config=config)
 
     assert SetReplyWaitAction.description == "自定义等待工具说明"
     assert ScheduleThoughtAction.description == "自定义预约工具说明\n\n自定义预约指导"
+    assert ScheduleThoughtGroupAction.description == "自定义群聊预约工具说明\n\n自定义群聊预约指导"
 
 
-def test_bridge_actions_are_private_only() -> None:
-    """Bridge Actions 应只在私聊中暴露。"""
+def test_bridge_actions_are_all_chat_type() -> None:
+    """Bridge Actions 的 chat_type 应按场景分流：私聊版 PRIVATE、群聊版 GROUP、其余 ALL。"""
 
-    assert SetReplyWaitAction.chat_type is ChatType.PRIVATE
+    assert SetReplyWaitAction.chat_type is ChatType.ALL
     assert ScheduleThoughtAction.chat_type is ChatType.PRIVATE
+    assert ScheduleThoughtGroupAction.chat_type is ChatType.GROUP
+    assert MemoAction.chat_type is ChatType.ALL
+    assert MemoDeleteAction.chat_type is ChatType.ALL
 
 
 @pytest.mark.asyncio
-async def test_bridge_actions_go_activate_rejects_group_chat() -> None:
-    """即使 NDFC 注入路径绕过 ActionManager，go_activate 也应拒绝群聊。"""
+async def test_bridge_actions_go_activate_private_only_blocks_group() -> None:
+    """群聊/讨论组默认不启用主动思考：私聊版在群聊拒绝，群聊版默认也拒绝。"""
 
     plugin = NDFCKokoroBridgePlugin(config=NDFCKokoroBridgeConfig())
     group_stream = ChatStream(stream_id="stream-group-action", platform="qq", chat_type="group")
 
     wait_action = SetReplyWaitAction(chat_stream=group_stream, plugin=plugin)
     schedule_action = ScheduleThoughtAction(chat_stream=group_stream, plugin=plugin)
+    schedule_group_action = ScheduleThoughtGroupAction(chat_stream=group_stream, plugin=plugin)
 
     assert await wait_action.go_activate() is False
     assert await schedule_action.go_activate() is False
+    assert await schedule_group_action.go_activate() is False
+
+
+@pytest.mark.asyncio
+async def test_bridge_actions_go_activate_allows_group_when_group_enabled() -> None:
+    """group_enabled 开启时，群聊版预约 Action 应允许群聊；私聊版仍拒绝。"""
+
+    config = NDFCKokoroBridgeConfig()
+    config.wait.private_only = False
+    config.proactive.group_enabled = True
+    plugin = NDFCKokoroBridgePlugin(config=config)
+    group_stream = ChatStream(stream_id="stream-group-action-open", platform="qq", chat_type="group")
+
+    wait_action = SetReplyWaitAction(chat_stream=group_stream, plugin=plugin)
+    schedule_action = ScheduleThoughtAction(chat_stream=group_stream, plugin=plugin)
+    schedule_group_action = ScheduleThoughtGroupAction(chat_stream=group_stream, plugin=plugin)
+
+    assert await wait_action.go_activate() is True
+    assert await schedule_action.go_activate() is False
+    assert await schedule_group_action.go_activate() is True
 
 
 @pytest.mark.asyncio
 async def test_bridge_actions_go_activate_accepts_private_chat() -> None:
-    """Bridge Actions 在私聊中应可按配置激活。"""
+    """Bridge Actions 在私聊中应可按配置激活；群聊版在私聊拒绝。"""
 
     plugin = NDFCKokoroBridgePlugin(config=NDFCKokoroBridgeConfig())
     private_stream = ChatStream(stream_id="stream-private-action", platform="qq", chat_type="private")
 
     wait_action = SetReplyWaitAction(chat_stream=private_stream, plugin=plugin)
     schedule_action = ScheduleThoughtAction(chat_stream=private_stream, plugin=plugin)
+    schedule_group_action = ScheduleThoughtGroupAction(chat_stream=private_stream, plugin=plugin)
 
     assert await wait_action.go_activate() is True
     assert await schedule_action.go_activate() is True
+    assert await schedule_group_action.go_activate() is False
 
 
 @pytest.mark.asyncio

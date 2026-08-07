@@ -1,6 +1,7 @@
 """NDFC Kokoro Bridge 消息观察处理器。
 
-监听消息接收与发送事件，维护私聊流的最近活动时间、等待状态和心理活动摘要。
+监听消息接收与发送事件，维护聊天流的最近活动时间、等待状态、场景类型
+和心理活动摘要。
 """
 
 from __future__ import annotations
@@ -21,10 +22,10 @@ logger = get_logger("ndfc_kokoro_bridge.message")
 
 
 class NDFCKokoroMessageObserver(BaseEventHandler):
-    """观察私聊消息收发并更新 BridgeSession。"""
+    """观察消息收发并更新 BridgeSession。"""
 
     name: str = "ndfc_kokoro_message_observer"
-    description: str = "记录私聊消息收发状态并维护回复等待"
+    description: str = "记录消息收发状态并维护回复等待"
     weight: int = 5
     intercept_message: bool = False
     init_subscribe: list[EventType] = [EventType.ON_MESSAGE_RECEIVED, EventType.ON_MESSAGE_SENT]
@@ -51,20 +52,25 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
         if not isinstance(message, Message):
             return EventDecision.PASS, params
 
-        chat_type = getattr(message.chat_type, "value", message.chat_type)
-        if config.plugin.private_only and str(chat_type) != "private":
+        chat_type = str(getattr(message.chat_type, "value", message.chat_type))
+        if not config.plugin.is_scene_enabled(chat_type):
             return EventDecision.SUCCESS, params
 
         normalized_event_name = str(getattr(event_name, "value", event_name))
         if normalized_event_name == EventType.ON_MESSAGE_RECEIVED.value:
-            await self._on_message_received(message)
+            await self._on_message_received(message, chat_type)
         elif normalized_event_name == EventType.ON_MESSAGE_SENT.value:
-            await self._on_message_sent(message)
+            await self._on_message_sent(message, chat_type)
 
         return EventDecision.SUCCESS, params
 
-    async def _on_message_received(self, message: Message) -> None:
-        """记录用户消息到达。"""
+    async def _on_message_received(self, message: Message, chat_type: str) -> None:
+        """记录用户消息到达。
+
+        Args:
+            message: 收到的消息。
+            chat_type: 聊天场景。
+        """
         store = self.get_store()
         config = self.get_config()
         stream_id = message.stream_id
@@ -75,6 +81,7 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
             session = await store.get_or_create(stream_id)
             session.platform = message.platform or session.platform
             session.user_id = message.sender_id or session.user_id
+            session.chat_type = chat_type or session.chat_type
             msg_time = float(message.time) if isinstance(message.time, (int, float)) else time.time()
             session.last_user_message_at = msg_time
             session.last_activity_at = msg_time
@@ -100,8 +107,13 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
             )
             await store.save(session)
 
-    async def _on_message_sent(self, message: Message) -> None:
-        """记录 Bot 消息发送。"""
+    async def _on_message_sent(self, message: Message, chat_type: str) -> None:
+        """记录 Bot 消息发送。
+
+        Args:
+            message: 发送的消息。
+            chat_type: 聊天场景。
+        """
         store = self.get_store()
         config = self.get_config()
         stream_id = message.stream_id
@@ -111,6 +123,7 @@ class NDFCKokoroMessageObserver(BaseEventHandler):
         async with store.lock(stream_id):
             session = await store.get_or_create(stream_id)
             session.platform = message.platform or session.platform
+            session.chat_type = chat_type or session.chat_type
             target_user_id = str(message.extra.get("target_user_id") or "")
             if target_user_id:
                 session.user_id = target_user_id

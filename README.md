@@ -1,63 +1,152 @@
-# NDFC Kokoro Bridge
+# NDFC 增强扩展（ndfc_kokoro_bridge）
 
-**NDFC Kokoro Bridge** 是一个为 Neo-MoFox 框架中的 `neo_default_chatter`（NDFC）量身定制的"旁路增强"插件。它旨在不修改 NDFC 源码的前提下，为其提供类似 KokoroFlowChatter（KFC）的高级私聊心理状态管理能力。
+*Kokoro（心）· Bridge（桥）——为 `neo_default_chatter` 连接内心与过往的桥。*
 
-## 核心功能
+Neo-MoFox 插件 · 零侵入 · 私聊与群聊同源
 
-- **运行时状态注入**：通过 `on_prompt_build` 事件，将私聊的实时状态（如等待剩余时间、预约信息、触发原因、近期心理活动）注入 NDFC 的 User Prompt。
-- **回复等待（Reply Wait）**：允许模型在发完消息后登记"心理等待"状态。支持三阶段引导提示和硬性连续超时限制。
-- **预约思考（Scheduled Thought）**：允许模型预约未来某个时间点的主动唤醒，用于维持长线联系节律。
-- **主动触发（Proactive Trigger）**：在私聊沉默较久时，根据概率和勿扰时段自动唤醒模型。
-- **心理日志（Mental Log）**：记录模型在调用 Bridge 工具时的内心思考，并在后续对话中作为上下文参考。
+---
 
-## 快速开始
+## 引言
 
-1. 确保已安装并启用 `neo_default_chatter` 插件。
-2. 将本插件放入 `plugins` 目录。
-3. 插件会自动识别私聊环境并向 NDFC 暴露以下工具：
-   - `set_reply_wait`：设置回复等待。
-   - `schedule_thought`：预约下一次主动思考。
+对话总有中断——重启、断开、长久的沉默。每次中断后，NDFC 都记得"说过什么"，却忘了"想过什么"：那些工具调用、操作结果、推理过程，都只存在于内存里，随进程一起消散。
+
+`ndfc_kokoro_bridge` 是连接"此刻"与"过往"的桥：为每个聊天流保留一份**实时、完整、可跨中断恢复的上下文快照**，并在此基础上提供备忘录、回复等待、预约思考与主动触发能力，让机器人在私聊与群聊里都活得更连贯、更有"自己的节奏"。
+
+---
+
+## 🎯 让机器人"活"起来
+
+你还在为机器人一重启就"失忆"、把调过的工具和想过的念头全忘光，只能干等着人来搭话而发愁吗？但今天不一样！不要手动重建上下文，不要死记硬背小纸条，不要傻等三天没人理，更不要忍受一问一答的冷冰冰机器！只需装上一个插件，完整记忆、私人备忘、主动问候、长线预约，一次全带走！机器人从此记得每一句心里话，还会在合适的时机主动想起你——让对话真正活起来！
+
+---
+
+## 核心能力
+
+### 上下文完整快照（核心）
+
+对话不是一句一句的孤立消息，而是一段连续的思考流。工具调用了什么、操作结果如何、模型在推理什么——这些"过程"默认只存在内存里，程序一重启就丢了，机器人会突然"失忆"。
+
+这个插件为每个聊天流维护一份**实时镜像的完整上下文快照**：
+
+- **每流一份实时镜像**：镜像 NDFC 此刻正在发送给模型的完整上下文链——系统提示、对话历史、工具调用、工具结果、模型推理与思考。
+- **实时更新**：每次 LLM 请求发出前自动同步刷新，快照永远是最新状态。
+- **跨中断恢复**：快照持久化在磁盘上，无论主程序如何重启、断开、崩溃，NDFC 重启后都能从快照还原最近的完整上下文，仿佛从没中断过。
+- **随压缩同步**：框架上下文压缩时快照同步更新，被压缩丢弃的图片与旧话同样从快照中移除，不会残留过期内容。
+- **媒体完整保留**：快照捕获时媒体仍在上下文中，就完整保存其数据与类型；重启后随上下文一起还原。
+
+> 快照只保存 NDFC 真正发送给模型的内容，不增不减，不加工，不写总结。
+
+### 私人备忘录
+
+给机器人一个"便签本"——把那些需要在一段时间内明确记住的事写下来：
+
+- **写下待办与提醒**：约定、承诺、需要兑现的事、未来想问的问题、想分享的内容……都可以记。
+- **自动过期**：每条备忘带过期时间，到期自动清理，不会一直堆积。
+- **自动提醒**：有效备忘会随状态注入持续展示给模型，让它保持"记得这件事"，但不会反复念叨。
+- **随用随删**：事情办完或不再相关时，模型可以主动删除。
+
+### 回复等待
+
+让机器人理解"我说完话后，该不该等对方"：
+
+- **记录等待状态**：登记发完消息后是否在等对方回复，以及那一刻的想法、期待对方如何回应。
+- **三阶段超时引导**：等待超时会分阶段引导——先提醒想想有没有没说完的，再警示沉默，最后强制结束，避免无休止空等。
+- **连续超时上限**：达到上限后拒绝继续设置等待，防止陷入"反复等不到回复"的死循环。
+
+### 主动思考预约
+
+让机器人能"安排自己"——在合适的时机主动想起某段关系或话题：
+
+- **私聊版（`schedule_thought`）**：维护与某人的下一次主动联系预约，是私聊中保持关系自然延续的主要方式。对话告一段落后，安排一个时机重新想起对方、续上话题或主动联系；可以根据关系进展随时检查、更新或取消。
+- **群聊版（`schedule_thought_group`）**：在约定了一件事、或认定某个时机值得回来看一眼这个群时设置；到期时带着当初写下的原因回来。
+- **到期投回原因**：预约时写下的 reason 会在唤醒时原样投回，让未来的自己能立刻接上当初的意图。
+- **预约即状态**：新预约覆盖旧预约；`delay_minutes=0` 取消；不受勿扰时段限制，深夜或清晨设定的预约也会如期触发。
+
+### 主动触发
+
+让机器人不只是"被动应答"，偶尔也会"自己想起"：
+
+- **沉默触发**：聊天流沉默一段时间后，按概率主动唤醒，回来看一眼——有值得说的就说，没有就安静地冒个泡，甚至只是看一眼。
+- **三类触发源**：预约到期、等待超时、沉默过久。
+- **勿扰时段**：深夜与清晨（默认 23:00 ~ 07:00）不进行沉默触发，避免打扰。
+
+### 智能状态注入
+
+机器人需要"感知状态"才能活得连贯。插件把状态分两类、放对位置：
+
+- **长期状态 → 系统提醒**：预约与备忘是低频变化的长期事实，通过系统提醒注入，跟随对话自然呈现，且始终保持在末尾、不重复累积——让机器人稳定地"记得这件事"。
+- **即时状态 → 对话提示**：回复等待、触发原因、近期心理活动等每轮都在变的动态信息，注入到对话提示中，且动态时间信息放在最后，不影响前缀缓存。
+
+---
+
+## 全场景支持
+
+插件支持多个聊天场景，不再局限于私聊：
+
+| 场景 | 说明 |
+| --- | --- |
+| 私聊（private） | 一对一的关系节律：等待、预约、主动触发全部适用 |
+| 群聊（group） | 按群整体氛围维护状态；备忘录与上下文快照完整生效 |
+| 讨论组（discuss） | 同群聊 |
+
+- **主动思考默认只在私聊开启**；群聊/讨论组默认关闭，需在配置中手动开启（`[proactive] group_enabled = true`）。
+- `enabled_scenes` 配置可精确控制每个能力在哪些场景生效。
+
+---
 
 ## 组件清单
-
-本插件由以下组件组成（与 [`manifest.json`](manifest.json) 中 `include` 声明一一对应）：
 
 | 组件类型 | 组件名 | 职责 |
 | --- | --- | --- |
 | Action | `set_reply_wait` | 登记发完消息后的回复等待状态与内心思考 |
-| Action | `schedule_thought` | 预约/取消下一次主动思考 |
-| EventHandler | `ndfc_kokoro_message_observer` | 观察私聊消息收发，维护会话时间戳与等待状态 |
-| EventHandler | `ndfc_kokoro_prompt_state_injector` | 在 NDFC user prompt 构建时注入运行状态 |
-| Service | `ndfc_kokoro_state` | 统一封装会话读写、等待/预约与状态渲染 |
+| Action | `schedule_thought` | 私聊版：预约 / 取消下一次主动联系思考 |
+| Action | `schedule_thought_group` | 群聊版：预约 / 取消下一次主动回看群聊 |
+| Action | `memo` | 写入或刷新一条带过期时间的私人备忘录 |
+| Action | `memo_delete` | 删除指定的备忘录 |
+| EventHandler | `ndfc_kokoro_message_observer` | 观察消息收发，维护会话时间戳与等待状态 |
+| EventHandler | `ndfc_kokoro_prompt_state_injector` | 注入即时状态到对话提示，并同步长期状态到系统提醒 |
+| EventHandler | `ndfc_kokoro_context_snapshot` | 捕获 LLM 请求生命周期事件，实时维护完整上下文快照 |
+| Service | `ndfc_kokoro_state` | 统一封装会话读写、等待 / 预约 / 备忘与状态渲染 |
+
+> 插件全部经 `src.app.plugin_system.*` 公共 API 接入——**不修改框架源码，不修改 NDFC 源码**。
+
+---
 
 ## 配置说明
 
-配置文件位于 `config/plugins/ndfc_kokoro_bridge/config.toml`，首次启动时自动生成。各配置节说明如下。
+配置文件位于 `config/plugins/ndfc_kokoro_bridge/config.toml`，首次启动时自动生成。
 
 ### `[plugin]` 插件基础配置
 
 - `enabled`：是否启用插件（默认 `true`）。
-- `debug_log`：是否输出调试日志（默认 `false`）。
-- `private_only`：是否仅在私聊中生效（默认 `true`）。
-- `target_prompt`：目标 prompt 名称，用于定位 NDFC 的 user prompt 构建事件（默认 `neo_default_chatter_user_prompt`）。
-- `enable_prompt_state_injection`：是否把运行时状态注入 NDFC user prompt extra（默认 `true`）。
+- `enabled_scenes`：生效的场景列表（默认 `["private", "group", "discuss"]`）。
+- `enable_prompt_state_injection`：是否注入运行时状态（默认 `true`）。
 
-### `[mental]` 心理活动记录配置
+### `[snapshot]` 上下文快照配置
 
-- `max_log_entries`：每个私聊保留的最大心理活动条数（默认 `50`）。
-- `inject_recent_entries`：每次注入最近多少条心理活动（默认 `6`）。
-- `max_entry_chars`：单条心理活动注入时的最大字符数（默认 `240`）。
+- `enabled`：是否启用完整上下文快照（默认 `true`）。
+- `capture_llm_lifecycle`：是否监听 LLM 生命周期事件实时更新快照（默认 `true`）。
+
+### `[memo]` 备忘录配置
+
+- `enabled`：是否启用备忘录（默认 `true`）。
+- `max_entries`：单流最大有效备忘条数（默认 `10`）。
+- `min_expire_hours` / `max_expire_hours`：过期时长范围（默认 `1` / `336` 小时）。
+- `default_expire_hours`：未指定过期时长时的默认值（默认 `24` 小时）。
 
 ### `[wait]` 回复等待配置
 
 - `enabled`：是否启用回复等待（默认 `true`）。
+- `private_only`：等待是否仅限私聊（默认 `true`）。
 - `min_seconds` / `max_seconds`：等待时长归一化范围（默认 `10` / `600` 秒）。
-- `max_consecutive_timeouts`：连续超时上限（默认 `3`），达到上限后强制结束等待。
-- `timeout_stage_X_prompt`：各阶段的引导提示词，支持自定义。
+- `max_consecutive_timeouts`：连续超时上限（默认 `3`）。
+- `timeout_stage_X_prompt`：各阶段的引导提示词，可自定义。
 
 ### `[proactive]` 主动思考与预约配置
 
-- `enabled`：是否启用主动思考（默认 `true`）。
+- `enabled`：主动思考总开关（默认 `true`）。
+- `private_enabled`：私聊是否启用预约/沉默触发（默认 `true`）。
+- `group_enabled`：群聊/讨论组是否启用（**默认 `false`，需手动开启**）。
 - `silence_threshold`：沉默多久后可触发主动思考（默认 `7200` 秒）。
 - `trigger_probability`：沉默主动触发概率（默认 `0.3`）。
 - `min_interval`：两次主动触发最小间隔（默认 `1800` 秒）。
@@ -68,30 +157,37 @@
 
 ### `[action_prompt]` 工具提示词配置
 
-- `set_reply_wait_description`：`set_reply_wait` Action 的工具描述。
-- `schedule_thought_description`：`schedule_thought` Action 的工具描述。
-- `schedule_guidance`：追加到预约描述后的使用指导，留空则不追加。
+每个 Action 展示给 NDFC 的工具描述都可自定义，且私聊/群聊预约各自独立：
+
+- `set_reply_wait_description`：`set_reply_wait` 的工具描述。
+- `schedule_thought_description`：私聊版 `schedule_thought` 的工具描述。
+- `schedule_thought_group_description`：群聊版 `schedule_thought_group` 的工具描述。
+- `memo_description` / `memo_delete_description`：备忘录工具描述。
+- `schedule_guidance` / `schedule_guidance_group`：私聊/群聊预约的使用指导。
 
 ### `[state_prompt]` 状态注入文案配置
 
-- `title` / `intro` / `current_state_title` / `mental_log_title` / `trigger_title` / `private_chat_line`：状态注入块的标题与说明文案，可自定义。
+`title` / `intro` / `current_state_title` / `trigger_title` / `scene_line` 等，控制状态注入块的标题与说明文案，可自定义。
 
 ### `[wake_prompt]` 主动唤醒文案配置
 
-- `trigger_template`：主动唤醒触发消息模板，支持 `{trigger_type}` 与 `{reason}` 占位符。
+- `trigger_template`：主动唤醒触发消息模板，支持 `{trigger_type}` 与 `{reason}` 占位符；默认会提示"有值得说的就说，没有就保持沉默或冒个泡"。
 
-## 设计哲学
+---
 
-本插件遵循"外科手术式增强"原则：
+## 设计原则
 
-- **零侵入**：不修改框架核心代码，不修改 NDFC 代码。
-- **状态隔离**：Bridge 维护独立于 NDFC 的 Session 状态，仅在 Prompt 构建阶段进行事实注入。
-- **私聊专用**：所有 Bridge 工具和状态注入仅在私聊（Private Chat）中生效。
+- **零侵入**：不修改框架核心代码，不修改 NDFC 代码，全部经 `src.app.plugin_system.*` 公共 API 接入。
+- **事实一致**：快照只保存 NDFC 真正发送给模型的上下文，不加工、不杜撰。
+- **状态隔离**：插件维护独立于 NDFC 的会话状态，仅在合适的时机进行事实注入。
+- **场景同源**：私聊与群聊共享同一套状态机制，按场景语义自然分化。
+- **健壮持久**：快照在每次请求前同步，任何中断后都能从磁盘完整恢复。
+
+---
 
 ## 开发与验证
 
 - 代码规范遵循仓库 [`代码规范.md`](../../../代码规范.md) 与 [`AI插件编写规范.md`](../../../AI插件编写规范.md)。
-- 组件统一使用 `name` / `description` 属性标识（不使用已弃用的 `action_name` / `handler_name` 等旧属性名）。
 - 手动验证步骤见 [`test/manual_verification.md`](test/manual_verification.md)。
 - 单元测试位于 `test/` 目录，运行：
 

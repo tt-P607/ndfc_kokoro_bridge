@@ -41,7 +41,10 @@ async def wake_stream(
     config: NDFCKokoroBridgeConfig | None = None,
     allow_cold_start: bool = True,
 ) -> bool:
-    """向目标私聊流注入系统触发消息并尝试启动流循环。
+    """向目标聊天流注入系统触发消息并尝试启动流循环。
+
+    私聊场景按 user_id 定位目标，群聊/讨论组按 chat_type 还原场景；
+    冷启动时按场景创建流。
 
     Args:
         session: 目标会话状态。
@@ -56,6 +59,9 @@ async def wake_stream(
     if not session.stream_id:
         return False
 
+    chat_type = session.chat_type or "private"
+    is_group = chat_type in ("group", "discuss")
+
     chat_stream = await get_stream(session.stream_id)
     is_cold_start = chat_stream is None
 
@@ -63,15 +69,18 @@ async def wake_stream(
         if not allow_cold_start:
             logger.debug(f"跳过冷启动唤醒 stream={session.stream_id[:8]} trigger={trigger_type}")
             return False
-        if not session.platform or not session.user_id:
+        if not session.platform:
             logger.debug(f"缺少冷启动元信息 stream={session.stream_id[:8]}")
+            return False
+        if not is_group and not session.user_id:
+            logger.debug(f"缺少私聊冷启动目标 stream={session.stream_id[:8]}")
             return False
         try:
             chat_stream = await get_or_create_stream(
                 stream_id=session.stream_id,
                 platform=session.platform,
                 user_id=session.user_id,
-                chat_type="private",
+                chat_type=chat_type,
             )
         except Exception as exc:
             logger.warning(f"冷启动流失败 stream={session.stream_id[:8]}: {exc}")
@@ -87,10 +96,10 @@ async def wake_stream(
         content=content,
         processed_plain_text=content,
         message_type=MessageType.TEXT,
-        sender_id=session.user_id or "system",
+        sender_id="system",
         sender_name="系统",
         platform=chat_stream.platform or session.platform,
-        chat_type="private",
+        chat_type=chat_type,
         stream_id=session.stream_id,
         target_user_id=session.user_id,
     )

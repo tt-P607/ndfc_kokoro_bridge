@@ -184,6 +184,7 @@ class BridgeSessionStore:
         index[session.stream_id] = {
             "platform": session.platform,
             "user_id": session.user_id,
+            "chat_type": session.chat_type,
             "last_activity_at": session.last_activity_at,
             "scheduled_at": session.scheduled_at,
         }

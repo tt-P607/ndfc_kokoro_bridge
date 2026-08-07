@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import random
 import time
+from typing import Any
 
 from src.app.plugin_system.api.log_api import get_logger
 from src.kernel.scheduler import TriggerType, get_unified_scheduler
@@ -29,15 +30,18 @@ class NDFCKokoroScheduler:
         self,
         config: NDFCKokoroBridgeConfig,
         store: BridgeSessionStore,
+        state_service: Any = None,
     ) -> None:
         """初始化调度器封装。
 
         Args:
             config: 插件配置。
             store: 会话存储。
+            state_service: 状态服务实例，用于触发后同步长期 system reminder。
         """
         self._config = config
         self._store = store
+        self._state_service = state_service
 
     async def start(self) -> None:
         """启动周期检查任务。"""
@@ -71,6 +75,34 @@ class NDFCKokoroScheduler:
         for stream_id in stream_ids:
             await self._check_one(stream_id)
 
+    def _is_scene_enabled(self, chat_type: str) -> bool:
+        """判断会话场景是否在启用列表中。
+
+        Args:
+            chat_type: 会话场景标识。
+
+        Returns:
+            场景是否启用。
+        """
+        return self._config.plugin.is_scene_enabled(chat_type or "private")
+
+    def _is_proactive_allowed(self, chat_type: str) -> bool:
+        """判断场景是否允许预约/主动触发。
+
+        私聊按 proactive.private_enabled（默认开），群聊/讨论组按
+        proactive.group_enabled（默认关，需手动开启）。
+
+        Args:
+            chat_type: 会话场景标识。
+
+        Returns:
+            是否允许主动触发。
+        """
+        proactive = self._config.proactive
+        if not proactive.enabled:
+            return False
+        return proactive.is_scene_enabled(chat_type or "private")
+
     async def _check_one(self, stream_id: str) -> None:
         """检查单个会话。"""
         allow_cold_start = True
@@ -79,17 +111,30 @@ class NDFCKokoroScheduler:
             if session is None:
                 return
 
+            chat_type = session.chat_type or "private"
+            if not self._is_scene_enabled(chat_type):
+                return
+
             now = time.time()
             trigger_type = ""
             reason = ""
 
-            if session.scheduled_at is not None and now >= session.scheduled_at:
+            if (
+                session.scheduled_at is not None
+                and now >= session.scheduled_at
+                and self._is_proactive_allowed(chat_type)
+            ):
                 trigger_type = "scheduled"
-                reason = session.scheduled_reason or "预约主动思考到期。"
+                # 预约理由原样投回，让被唤醒的你能立刻接上当初约定的意图
+                reason = session.scheduled_reason or "预约的主动思考时间到了。"
                 allow_cold_start = self._config.proactive.wake_cold_stream
                 session.scheduled_at = None
                 session.scheduled_reason = ""
-            elif session.waiting_until is not None and now >= session.waiting_until:
+            elif (
+                session.waiting_until is not None
+                and now >= session.waiting_until
+                and self._is_proactive_allowed(chat_type)
+            ):
                 trigger_type = "wait_timeout"
                 reason = session.waiting_reason or "回复等待超时。"
                 allow_cold_start = False
@@ -99,7 +144,8 @@ class NDFCKokoroScheduler:
                 session.consecutive_timeout_count += 1
             elif self._should_trigger_silence(now, session.last_activity_at, session.last_proactive_at):
                 trigger_type = "silence"
-                reason = "私聊已经沉默较久，触发一次主动思考。"
+                # 中性触发：只是突然想起这个聊天流，回来看一眼；有值得说的才说
+                reason = "突然想起这个聊天流，回来看一眼。"
                 allow_cold_start = False
 
             if not trigger_type:
@@ -125,6 +171,11 @@ class NDFCKokoroScheduler:
         )
         if success:
             logger.info(f"NDFC Kokoro Bridge 已唤醒 stream={stream_id[:8]} trigger={trigger_type}")
+
+        # 触发后预约可能已被清空，重新同步长期状态到 system reminder
+        sync = getattr(self._state_service, "sync_long_term_reminder", None)
+        if callable(sync):
+            await sync(stream_id)
 
     def _should_trigger_silence(
         self,
