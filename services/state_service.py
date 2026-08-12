@@ -26,7 +26,6 @@ class NDFCKokoroStateService(BaseService):
 
     name: str = "ndfc_kokoro_state"
     description: str = "维护 NDFC 聊天流状态、等待状态、预约思考状态和备忘录"
-    version: str = "2.0.0"
 
     def get_config(self) -> NDFCKokoroBridgeConfig:
         """获取插件配置，委托给插件实例。"""

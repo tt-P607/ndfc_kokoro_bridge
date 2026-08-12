@@ -32,8 +32,6 @@ class NDFCKokoroBridgePlugin(BasePlugin):
     """NeoDefaultChatter 全场景增强扩展插件。"""
 
     plugin_name: str = "ndfc_kokoro_bridge"
-    plugin_description: str = "为 neo_default_chatter 提供完整上下文快照、备忘录、回复等待、预约思考与主动唤醒"
-    plugin_version: str = "2.4.0"
 
     configs: list[type] = [NDFCKokoroBridgeConfig]
     dependent_components: list[str] = ["neo_default_chatter:chatter:neo_default_chatter"]
