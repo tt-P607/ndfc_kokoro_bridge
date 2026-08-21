@@ -77,7 +77,7 @@
   ],
   "entry_point": "plugin.py",
   "api_version": {
-    "action_api": "1.0.0",
+    "action_api": "2.0.0",
     "event_api": "1.0.0",
     "log_api": "1.0.0",
     "storage_api": "1.0.0",
