@@ -5,6 +5,9 @@
 的多角色 payload 链（user / assistant / tool_result）合并回请求，
 实现上下文恢复。
 
+恢复与保存均遵守聊天流数据库中的 ``context_cleared_at`` 清空边界。
+旧边界的快照会被删除，清空前开始的请求链不再保存为可恢复快照。
+
 说明：NDFC 的 ``request.payloads`` 是跨轮累积的，框架会在响应后自动把
 assistant 与 tool_result 追加回 payloads，因此 ``before_llm_request`` 保存的
 快照已经包含完整对话链，无需在 ``after_llm_request`` 额外合并响应。
@@ -18,10 +21,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.app.plugin_system.api import database_api
 from src.app.plugin_system.api.event_api import EventDecision
 from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.base import BaseEventHandler
 from src.app.plugin_system.types import EventType
+from src.core.models.sql_alchemy import ChatStreams
 
 from ..snapshot import (
     capture_snapshot_from_payloads,
@@ -39,6 +44,8 @@ _NDFC_REQUEST_NAME = "neo_default_chatter"
 #: 注入恢复链时应跳过的"非对话历史"角色：system（NDFC 自行提供）与
 #: tool（工具 schema 声明）。恢复链插到这些角色之后、第一个对话 payload 之前。
 _NON_HISTORY_ROLES = {"system", "tool"}
+
+_CLEAR_MARKER = "_ndfc_kokoro_context_cleared_at"
 
 
 class NDFCKokoroContextSnapshotHandler(BaseEventHandler):
@@ -106,24 +113,39 @@ class NDFCKokoroContextSnapshotHandler(BaseEventHandler):
         self.plugin.mark_ndfc_stream(stream_id)  # type: ignore[attr-defined]
 
         store = self.get_snapshot_store()
-
-        # 重启后首次请求：把上次运行的完整上下文链合并回本次请求
-        if stream_id not in self._restored_streams:
+        async with store.lock(stream_id):
+            record = await database_api.get_by(ChatStreams, stream_id=stream_id)
+            cleared_at = float(record.context_cleared_at or 0.0) if record else 0.0
+            meta_data = params["meta_data"]
+            request_cleared_at = meta_data.setdefault(_CLEAR_MARKER, cleared_at)
             snapshot = await store.get(stream_id)
-            if snapshot is not None and snapshot.entries:
-                restored_payloads = deserialize_snapshot(snapshot)
-                if restored_payloads:
-                    params = self._inject_restored(params, restored_payloads)
-                    log_snapshot_restored(snapshot, len(restored_payloads))
-            # 无论是否有快照，都标记本进程已处理过该流，避免重复恢复
-            self._restored_streams.add(stream_id)
+            if snapshot is not None and (
+                snapshot.context_cleared_at != cleared_at
+                or (cleared_at > 0.0 and snapshot.updated_at <= cleared_at)
+            ):
+                await store.delete(stream_id)
+                snapshot = None
 
-        # 持久化本次请求的完整上下文链（覆盖式更新）
-        payloads = params.get("payloads")
-        if isinstance(payloads, list) and payloads:
-            snapshot = capture_snapshot_from_payloads(stream_id, payloads)
-            if snapshot is not None:
-                async with store.lock(stream_id):
+            if request_cleared_at != cleared_at:
+                self._restored_streams.add(stream_id)
+                return EventDecision.SUCCESS, params
+
+            # 重启后首次请求：把上次运行的完整上下文链合并回本次请求
+            if stream_id not in self._restored_streams:
+                if snapshot is not None and snapshot.entries:
+                    restored_payloads = deserialize_snapshot(snapshot)
+                    if restored_payloads:
+                        params = self._inject_restored(params, restored_payloads)
+                        log_snapshot_restored(snapshot, len(restored_payloads))
+                # 无论是否有快照，都标记本进程已处理过该流，避免重复恢复
+                self._restored_streams.add(stream_id)
+
+            # 持久化本次请求的完整上下文链（覆盖式更新）
+            payloads = params.get("payloads")
+            if isinstance(payloads, list) and payloads:
+                snapshot = capture_snapshot_from_payloads(stream_id, payloads)
+                if snapshot is not None:
+                    snapshot.context_cleared_at = cleared_at
                     await store.save(snapshot)
 
         return EventDecision.SUCCESS, params

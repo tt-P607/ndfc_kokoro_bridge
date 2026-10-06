@@ -197,12 +197,16 @@ class ContextSnapshot:
     镜像 NDFC 最近一次发送给模型的完整 payload 链（系统提示、对话历史、
     工具调用、工具结果、推理）。每次 LLM 请求前覆盖式更新，随框架上下文
     压缩同步变化；持久化于磁盘，供重启后恢复。
+
+    ``context_cleared_at`` 保存捕获时的官方清空边界；恢复时必须与数据库
+    当前边界一致，避免清空前的请求在清空后落盘并重新恢复。
     """
 
     stream_id: str
     updated_at: float = field(default_factory=time.time)
     version: int = 1
     entries: list[SnapshotEntry] = field(default_factory=list)
+    context_cleared_at: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
         """序列化为字典。
@@ -215,6 +219,7 @@ class ContextSnapshot:
             "updated_at": self.updated_at,
             "version": self.version,
             "entries": [entry.to_dict() for entry in self.entries],
+            "context_cleared_at": self.context_cleared_at,
         }
 
     @classmethod
@@ -238,6 +243,7 @@ class ContextSnapshot:
             updated_at=float(data.get("updated_at", time.time())),
             version=int(data.get("version", 1)),
             entries=entries,
+            context_cleared_at=float(data.get("context_cleared_at", 0.0) or 0.0),
         )
 
 

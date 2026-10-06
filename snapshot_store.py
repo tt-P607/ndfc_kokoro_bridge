@@ -108,6 +108,19 @@ class SnapshotStore:
         if len(self._locks) > 100:
             self.cleanup_inactive_locks()
 
+    async def delete(self, stream_id: str) -> None:
+        """删除指定流的快照文件、内存缓存和索引项。
+
+        Args:
+            stream_id: 聊天流 ID；调用方需持有该流的快照锁。
+        """
+        await storage_api.delete_json(_STORE_NAME, stream_id)
+        self._snapshots.pop(stream_id, None)
+        index = await storage_api.load_json(_STORE_NAME, _INDEX_KEY)
+        if isinstance(index, dict) and stream_id in index:
+            del index[stream_id]
+            await storage_api.save_json(_STORE_NAME, _INDEX_KEY, index)
+
     async def list_all_stream_ids(self) -> list[str]:
         """列出所有已持久化快照的 stream_id。
 
