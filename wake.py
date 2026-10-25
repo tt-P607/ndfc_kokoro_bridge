@@ -63,7 +63,6 @@ async def wake_stream(
     is_group = chat_type in ("group", "discuss")
 
     chat_stream = await get_stream(session.stream_id)
-    is_cold_start = chat_stream is None
 
     if chat_stream is None:
         if not allow_cold_start:
@@ -106,9 +105,7 @@ async def wake_stream(
     chat_stream.context.add_unread_message(trigger_message)
     logger.debug(f"已注入 NDFC Kokoro 触发消息 stream={session.stream_id[:8]}")
 
-    if is_cold_start:
-        return await _start_stream_loop(session.stream_id)
-    return True
+    return await _start_stream_loop(session.stream_id)
 
 
 async def _start_stream_loop(stream_id: str) -> bool:
